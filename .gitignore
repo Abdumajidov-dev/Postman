@@ -416,3 +416,10 @@ FodyWeavers.xsd
 *.msix
 *.msm
 *.msp
+
+# Pochtachi frontend (Vite/Electron)
+Postman/frontend/dist/
+Postman/frontend/dist-electron/
+Postman/frontend/release/
+.env
+.env.local

@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Pochtachi.API/Pochtachi.API.csproj" />
+    <Project Path="src/Pochtachi.Application/Pochtachi.Application.csproj" />
+    <Project Path="src/Pochtachi.Domain/Pochtachi.Domain.csproj" />
+    <Project Path="src/Pochtachi.Infrastructure/Pochtachi.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Pochtachi.UnitTests/Pochtachi.UnitTests.csproj" />
+  </Folder>
+</Solution>
