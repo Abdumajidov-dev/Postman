@@ -11,7 +11,9 @@ public record RequestDto(
     string Url,
     List<KeyValueDto> Headers,
     List<KeyValueDto> QueryParams,
+    string BodyMode,
     string? Body,
+    AuthDto? Auth,
     string? PreRequestScript,
     string? TestScript,
     int Order);
@@ -24,7 +26,9 @@ public record UpdateRequestRequest(
     string Url,
     List<KeyValueDto> Headers,
     List<KeyValueDto> QueryParams,
+    string BodyMode,
     string? Body,
+    AuthDto? Auth,
     string? PreRequestScript,
     string? TestScript,
     int Order);

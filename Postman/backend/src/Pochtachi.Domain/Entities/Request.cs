@@ -17,6 +17,11 @@ public class Request : BaseEntity
     /// <summary>Header/query-param/body — barchasi JSON sifatida saqlanadi (moslashuvchan schema).</summary>
     public string HeadersJson { get; set; } = "[]";
     public string QueryParamsJson { get; set; } = "[]";
+
+    /// <summary>none | raw-json | raw-text | x-www-form-urlencoded | form-data</summary>
+    public string BodyMode { get; set; } = "none";
+
+    /// <summary>raw-* uchun matn, urlencoded/form-data uchun KeyValueDto[] JSON.</summary>
     public string? BodyJson { get; set; }
 
     public Guid? AuthConfigId { get; set; }

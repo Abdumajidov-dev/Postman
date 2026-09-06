@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useCollectionStore } from '../stores/collections'
+import FolderNode from './FolderNode.vue'
 
 const store = useCollectionStore()
 
 const creatingCollection = ref(false)
 const newCollectionName = ref('')
-const creatingRequestFor = ref<string | null>(null)
-const newRequestName = ref('')
+const importing = ref(false)
+const exportingId = ref<string | null>(null)
 
 function startCreateCollection() {
   creatingCollection.value = true
@@ -19,22 +20,26 @@ async function confirmCreateCollection() {
   creatingCollection.value = false
 }
 
-function startCreateRequest(collectionId: string) {
-  creatingRequestFor.value = collectionId
-  newRequestName.value = ''
+async function importCollection() {
+  importing.value = true
+  try {
+    const result = await window.pochtachi.openFile()
+    if (result.ok && result.content) {
+      await store.importCollection(result.content)
+    }
+  } finally {
+    importing.value = false
+  }
 }
 
-async function confirmCreateRequest(collectionId: string) {
-  await store.createRequest(collectionId, newRequestName.value)
-  creatingRequestFor.value = null
-}
-
-const methodColor: Record<string, string> = {
-  GET: 'text-method-get',
-  POST: 'text-method-post',
-  PUT: 'text-method-put',
-  PATCH: 'text-method-patch',
-  DELETE: 'text-method-delete',
+async function exportCollection(id: string, name: string) {
+  exportingId.value = id
+  try {
+    const json = await store.exportCollection(id)
+    await window.pochtachi.saveFile({ defaultName: `${name}.postman_collection.json`, content: json })
+  } finally {
+    exportingId.value = null
+  }
 }
 </script>
 
@@ -42,13 +47,23 @@ const methodColor: Record<string, string> = {
   <aside class="w-64 shrink-0 overflow-y-auto border-r border-border-subtle bg-surface-1 p-3">
     <div class="flex items-center justify-between">
       <span class="text-xs font-semibold uppercase tracking-wide text-gray-500">Collections</span>
-      <button
-        class="flex h-6 w-6 items-center justify-center rounded-md text-lg leading-none text-gray-400 transition hover:bg-surface-2 hover:text-brand-400"
-        title="Yangi collection"
-        @click="startCreateCollection"
-      >
-        +
-      </button>
+      <div class="flex items-center gap-1">
+        <button
+          class="flex h-6 w-6 items-center justify-center rounded-md text-xs text-gray-400 transition hover:bg-surface-2 hover:text-brand-400 disabled:opacity-50"
+          title="Postman collection import qilish"
+          :disabled="importing"
+          @click="importCollection"
+        >
+          ⇩
+        </button>
+        <button
+          class="flex h-6 w-6 items-center justify-center rounded-md text-lg leading-none text-gray-400 transition hover:bg-surface-2 hover:text-brand-400"
+          title="Yangi collection"
+          @click="startCreateCollection"
+        >
+          +
+        </button>
+      </div>
     </div>
 
     <div v-if="creatingCollection" class="mt-2 flex gap-1">
@@ -63,7 +78,7 @@ const methodColor: Record<string, string> = {
     </div>
 
     <div v-if="store.items.length === 0 && !creatingCollection" class="mt-3 rounded-md border border-dashed border-border-subtle p-4 text-center text-xs text-gray-500">
-      Hali collection yo'q — "+" bosib yarating
+      Hali collection yo'q — "+" bosib yarating yoki Postman'dan import qiling
     </div>
 
     <ul v-else class="mt-2 space-y-0.5">
@@ -74,37 +89,17 @@ const methodColor: Record<string, string> = {
             <span>{{ col.name }}</span>
           </button>
           <div class="hidden items-center gap-1 group-hover:flex">
-            <button class="text-xs text-gray-500 hover:text-brand-400" title="Yangi so'rov" @click="startCreateRequest(col.id)">+</button>
+            <button
+              class="text-xs text-gray-500 hover:text-brand-400 disabled:opacity-50"
+              title="Postman formatida eksport"
+              :disabled="exportingId === col.id"
+              @click="exportCollection(col.id, col.name)"
+            >⇧</button>
             <button class="text-xs text-gray-500 hover:text-method-delete" title="O'chirish" @click="store.remove(col.id)">✕</button>
           </div>
         </div>
 
-        <div v-if="creatingRequestFor === col.id" class="ml-5 mt-1">
-          <input
-            v-model="newRequestName"
-            autofocus
-            class="w-full rounded-md border border-border-subtle bg-surface-2 px-2 py-1 text-xs text-gray-200 outline-none focus:border-brand-500"
-            placeholder="So'rov nomi"
-            @keyup.enter="confirmCreateRequest(col.id)"
-            @keyup.esc="creatingRequestFor = null"
-          />
-        </div>
-
-        <ul v-if="store.expanded[col.id]" class="ml-4 mt-0.5 space-y-0.5 border-l border-border-subtle pl-2">
-          <li
-            v-for="req in store.requestsByCollection[col.id] ?? []"
-            :key="req.id"
-            class="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-xs hover:bg-surface-2"
-            :class="store.selectedRequestId === req.id ? 'bg-surface-2' : ''"
-            @click="store.selectRequest(req.id)"
-          >
-            <span class="w-10 shrink-0 font-mono font-semibold" :class="methodColor[req.method] ?? 'text-gray-400'">{{ req.method }}</span>
-            <span class="truncate text-gray-300">{{ req.name }}</span>
-          </li>
-          <li v-if="(store.requestsByCollection[col.id] ?? []).length === 0" class="px-2 py-1 text-xs text-gray-600">
-            So'rov yo'q
-          </li>
-        </ul>
+        <FolderNode v-if="store.expanded[col.id]" :collection-id="col.id" :parent-folder-id="null" :depth="0" />
       </li>
     </ul>
   </aside>

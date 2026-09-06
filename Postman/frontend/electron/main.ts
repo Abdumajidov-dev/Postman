@@ -1,4 +1,5 @@
-import { app, BrowserWindow, ipcMain } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog } from 'electron'
+import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -56,6 +57,32 @@ ipcMain.handle('pochtachi:send-request', async (_event, config: {
       durationMs: Date.now() - startedAt,
     }
   }
+})
+
+// Renderer'dan berilgan matnni foydalanuvchi tanlagan faylga saqlaydi (export uchun).
+ipcMain.handle('pochtachi:save-file', async (_event, options: { defaultName: string; content: string }) => {
+  const win = BrowserWindow.getFocusedWindow()
+  const result = win
+    ? await dialog.showSaveDialog(win, { defaultPath: options.defaultName })
+    : await dialog.showSaveDialog({ defaultPath: options.defaultName })
+
+  if (result.canceled || !result.filePath) return { ok: false, canceled: true }
+
+  await fs.writeFile(result.filePath, options.content, 'utf-8')
+  return { ok: true, filePath: result.filePath }
+})
+
+// Foydalanuvchi tanlagan fayl matnini o'qiydi (import uchun).
+ipcMain.handle('pochtachi:open-file', async () => {
+  const win = BrowserWindow.getFocusedWindow()
+  const result = win
+    ? await dialog.showOpenDialog(win, { properties: ['openFile'], filters: [{ name: 'JSON', extensions: ['json'] }] })
+    : await dialog.showOpenDialog({ properties: ['openFile'], filters: [{ name: 'JSON', extensions: ['json'] }] })
+
+  if (result.canceled || result.filePaths.length === 0) return { ok: false, canceled: true }
+
+  const content = await fs.readFile(result.filePaths[0], 'utf-8')
+  return { ok: true, filePath: result.filePaths[0], content }
 })
 
 app.whenReady().then(createWindow)

@@ -9,10 +9,25 @@ export interface CollectionItem {
   description: string | null
 }
 
+export interface FolderItem {
+  id: string
+  collectionId: string
+  parentFolderId: string | null
+  name: string
+  order: number
+}
+
 export interface KeyValue {
   key: string
   value: string
   enabled: boolean
+}
+
+export type BodyMode = 'none' | 'raw-json' | 'raw-text' | 'x-www-form-urlencoded' | 'form-data'
+
+export interface AuthConfig {
+  type: 'NoAuth' | 'Basic' | 'Bearer' | 'ApiKey' | 'OAuth2' | 'Digest'
+  values: Record<string, string>
 }
 
 export interface RequestItem {
@@ -24,7 +39,9 @@ export interface RequestItem {
   url: string
   headers: KeyValue[]
   queryParams: KeyValue[]
+  bodyMode: BodyMode
   body: string | null
+  auth: AuthConfig | null
   preRequestScript: string | null
   testScript: string | null
   order: number
@@ -33,8 +50,10 @@ export interface RequestItem {
 export const useCollectionStore = defineStore('collections', {
   state: () => ({
     items: [] as CollectionItem[],
+    foldersByCollection: {} as Record<string, FolderItem[]>,
     requestsByCollection: {} as Record<string, RequestItem[]>,
     expanded: {} as Record<string, boolean>,
+    expandedFolders: {} as Record<string, boolean>,
     selectedRequestId: null as string | null,
   }),
   getters: {
@@ -72,13 +91,35 @@ export const useCollectionStore = defineStore('collections', {
       await api.delete(`/api/collections/${id}`)
       this.items = this.items.filter((c) => c.id !== id)
       delete this.requestsByCollection[id]
+      delete this.foldersByCollection[id]
     },
 
     async toggleExpand(collectionId: string) {
       this.expanded[collectionId] = !this.expanded[collectionId]
       if (this.expanded[collectionId] && !this.requestsByCollection[collectionId]) {
-        await this.fetchRequests(collectionId)
+        await Promise.all([this.fetchRequests(collectionId), this.fetchFolders(collectionId)])
       }
+    },
+
+    toggleExpandFolder(folderId: string) {
+      this.expandedFolders[folderId] = !this.expandedFolders[folderId]
+    },
+
+    async fetchFolders(collectionId: string) {
+      const { data } = await api.get<FolderItem[]>('/api/folders', { params: { collectionId } })
+      this.foldersByCollection[collectionId] = data
+    },
+
+    async createFolder(collectionId: string, name: string, parentFolderId: string | null) {
+      const trimmed = name.trim()
+      if (!trimmed) return
+      const { data } = await api.post<FolderItem>('/api/folders', {
+        collectionId,
+        parentFolderId,
+        name: trimmed,
+      })
+      if (!this.foldersByCollection[collectionId]) this.foldersByCollection[collectionId] = []
+      this.foldersByCollection[collectionId].push(data)
     },
 
     async fetchRequests(collectionId: string) {
@@ -88,12 +129,12 @@ export const useCollectionStore = defineStore('collections', {
       this.requestsByCollection[collectionId] = data
     },
 
-    async createRequest(collectionId: string, name: string) {
+    async createRequest(collectionId: string, name: string, folderId: string | null = null) {
       const trimmed = name.trim()
       if (!trimmed) return
       const { data } = await api.post<RequestItem>('/api/requests', {
         collectionId,
-        folderId: null,
+        folderId,
         name: trimmed,
         method: 'GET',
         url: '',
@@ -110,7 +151,9 @@ export const useCollectionStore = defineStore('collections', {
         url: request.url,
         headers: request.headers,
         queryParams: request.queryParams,
+        bodyMode: request.bodyMode,
         body: request.body,
+        auth: request.auth,
         preRequestScript: request.preRequestScript,
         testScript: request.testScript,
         order: request.order,
@@ -122,6 +165,23 @@ export const useCollectionStore = defineStore('collections', {
 
     selectRequest(id: string) {
       this.selectedRequestId = id
+    },
+
+    async importCollection(json: string) {
+      const workspace = useWorkspaceStore()
+      const { data } = await api.post<CollectionItem>('/api/collections/import', json, {
+        params: { workspaceId: workspace.id },
+        headers: { 'Content-Type': 'application/json' },
+      })
+      this.items.push(data)
+      return data
+    },
+
+    async exportCollection(collectionId: string): Promise<string> {
+      const { data } = await api.get<string>(`/api/collections/${collectionId}/export`, {
+        transformResponse: (res) => res,
+      })
+      return data
     },
   },
 })

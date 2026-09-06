@@ -17,7 +17,25 @@ export interface HttpResponseResult {
   durationMs: number
 }
 
+export interface SaveFileResult {
+  ok: boolean
+  canceled?: boolean
+  filePath?: string
+}
+
+export interface OpenFileResult {
+  ok: boolean
+  canceled?: boolean
+  filePath?: string
+  content?: string
+}
+
 contextBridge.exposeInMainWorld('pochtachi', {
   sendRequest: (config: HttpRequestConfig): Promise<HttpResponseResult> =>
     ipcRenderer.invoke('pochtachi:send-request', config),
+
+  saveFile: (options: { defaultName: string; content: string }): Promise<SaveFileResult> =>
+    ipcRenderer.invoke('pochtachi:save-file', options),
+
+  openFile: (): Promise<OpenFileResult> => ipcRenderer.invoke('pochtachi:open-file'),
 })
