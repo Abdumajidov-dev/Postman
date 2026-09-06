@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useSwitchStore } from '../stores/switches'
-import { useCollectionStore, type KeyValue, type BodyMode, type AuthConfig } from '../stores/collections'
+import { useCollectionStore, type KeyValue, type BodyMode } from '../stores/collections'
 import { useHistoryStore } from '../stores/history'
-import { resolveTemplate } from '../utils/template'
-import { createPreRequestPm, createTestPm, runScript, type TestResult } from '../utils/scripting'
+import { executeRequest } from '../utils/requestExecutor'
+import type { TestResult } from '../utils/scripting'
 import AuthEditor from './AuthEditor.vue'
 
 const methods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const
@@ -30,7 +30,6 @@ const historyStore = useHistoryStore()
 
 const current = computed(() => collectionStore.selectedRequest)
 const ownerCollection = computed(() => collectionStore.items.find((c) => c.id === current.value?.collectionId))
-const effectiveAuth = computed<AuthConfig | null>(() => current.value?.auth ?? ownerCollection.value?.auth ?? null)
 
 const activeTab = ref<'params' | 'headers' | 'auth' | 'body' | 'scripts'>('params')
 const sending = ref(false)
@@ -96,65 +95,6 @@ async function save() {
   }
 }
 
-/** OAuth2 client_credentials orqali token oladi (Electron main process orqali, CORS'siz). */
-async function fetchOAuth2Token(values: Record<string, string>, resolve: (k: string) => string | undefined) {
-  const url = resolveTemplate(values.accessTokenUrl ?? '', resolve)
-  const clientId = resolveTemplate(values.clientId ?? '', resolve)
-  const clientSecret = resolveTemplate(values.clientSecret ?? '', resolve)
-  if (!url) return undefined
-
-  const body = new URLSearchParams({
-    grant_type: values.grantType || 'client_credentials',
-    client_id: clientId,
-    client_secret: clientSecret,
-  }).toString()
-
-  const res = await window.pochtachi.sendRequest({
-    method: 'POST',
-    url,
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body,
-  })
-  if (!res.ok || !res.body) return undefined
-  try {
-    return (JSON.parse(res.body) as { access_token?: string }).access_token
-  } catch {
-    return undefined
-  }
-}
-
-async function resolveAuthHeaders(auth: AuthConfig | null, query: URLSearchParams, resolve: (k: string) => string | undefined) {
-  const headers: Record<string, string> = {}
-  if (!auth) return headers
-
-  switch (auth.type) {
-    case 'Bearer':
-      headers.Authorization = `Bearer ${resolveTemplate(auth.values.token ?? '', resolve)}`
-      break
-    case 'Basic': {
-      const user = resolveTemplate(auth.values.username ?? '', resolve)
-      const pass = resolveTemplate(auth.values.password ?? '', resolve)
-      headers.Authorization = `Basic ${btoa(`${user}:${pass}`)}`
-      break
-    }
-    case 'ApiKey': {
-      const key = auth.values.key ?? ''
-      const value = resolveTemplate(auth.values.value ?? '', resolve)
-      if (auth.values.in === 'query') query.set(key, value)
-      else headers[key] = value
-      break
-    }
-    case 'OAuth2': {
-      const token = auth.values.accessToken?.trim()
-        ? resolveTemplate(auth.values.accessToken, resolve)
-        : await fetchOAuth2Token(auth.values, resolve)
-      if (token) headers.Authorization = `Bearer ${token}`
-      break
-    }
-  }
-  return headers
-}
-
 async function send() {
   if (!current.value) return
   sending.value = true
@@ -162,74 +102,23 @@ async function send() {
   testResults.value = []
   scriptError.value = null
 
-  const runtimeVars = new Map<string, string>()
-  const resolve = (key: string) => runtimeVars.get(key) ?? switchStore.resolve(key)
-
-  if (current.value.preRequestScript) {
-    const pm = createPreRequestPm({
-      get: (key) => resolve(key),
-      set: (key, value) => runtimeVars.set(key, value),
-    })
-    const { error } = runScript(current.value.preRequestScript, pm)
-    if (error) scriptError.value = `Pre-request script xatosi: ${error}`
-  }
-
-  const url = resolveTemplate(current.value.url, resolve)
-  const headers: Record<string, string> = {}
-  for (const h of current.value.headers) {
-    if (h.enabled && h.key) headers[h.key] = resolveTemplate(h.value, resolve)
-  }
-
-  const query = new URLSearchParams()
-  for (const p of current.value.queryParams) {
-    if (p.enabled && p.key) query.set(p.key, resolveTemplate(p.value, resolve))
-  }
-
-  Object.assign(headers, await resolveAuthHeaders(effectiveAuth.value, query, resolve))
-
-  const queryStr = query.toString()
-  const fullUrl = queryStr ? `${url}${url.includes('?') ? '&' : '?'}${queryStr}` : url
-
-  let body: string | undefined
-  if (current.value.bodyMode === 'raw-json' || current.value.bodyMode === 'raw-text') {
-    body = current.value.body ? resolveTemplate(current.value.body, resolve) : undefined
-    if (current.value.bodyMode === 'raw-json') headers['Content-Type'] ??= 'application/json'
-  } else if (current.value.bodyMode === 'x-www-form-urlencoded') {
-    const params = new URLSearchParams()
-    for (const kv of bodyKeyValues.value) if (kv.enabled && kv.key) params.set(kv.key, resolveTemplate(kv.value, resolve))
-    body = params.toString()
-    headers['Content-Type'] ??= 'application/x-www-form-urlencoded'
-  }
-
   try {
-    const res = await window.pochtachi.sendRequest({ method: current.value.method, url: fullUrl, headers, body })
-    result.value = res
-
-    if (current.value.testScript) {
-      const results: TestResult[] = []
-      const pm = createTestPm(
-        {
-          code: res.status ?? 0,
-          status: res.statusText ?? '',
-          responseTime: res.durationMs,
-          headers: res.headers ?? {},
-          text: () => res.body ?? '',
-          json: () => JSON.parse(res.body ?? '{}'),
-        },
-        results,
-      )
-      const { error } = runScript(current.value.testScript, pm)
-      testResults.value = results
-      if (error) scriptError.value = `Test script xatosi: ${error}`
-    }
+    const { fullUrl, requestHeaders, requestBody, response, testResults: results, scriptError: err } = await executeRequest(
+      current.value,
+      ownerCollection.value?.auth ?? null,
+      (key) => switchStore.resolve(key),
+    )
+    result.value = response
+    testResults.value = results
+    scriptError.value = err
 
     await historyStore.record({
       method: current.value.method,
       url: fullUrl,
-      status: res.status ?? null,
-      durationMs: res.durationMs,
-      request: { method: current.value.method, url: fullUrl, headers, body },
-      response: res,
+      status: response.status ?? null,
+      durationMs: response.durationMs,
+      request: { method: current.value.method, url: fullUrl, headers: requestHeaders, body: requestBody },
+      response,
     })
   } finally {
     sending.value = false

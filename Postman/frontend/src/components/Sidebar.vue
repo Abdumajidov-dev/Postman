@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 import { useCollectionStore } from '../stores/collections'
 import FolderNode from './FolderNode.vue'
+import CollectionRunner from './CollectionRunner.vue'
 
 const store = useCollectionStore()
 
@@ -9,6 +10,7 @@ const creatingCollection = ref(false)
 const newCollectionName = ref('')
 const importing = ref(false)
 const exportingId = ref<string | null>(null)
+const runningCollectionId = ref<string | null>(null)
 
 function startCreateCollection() {
   creatingCollection.value = true
@@ -89,6 +91,7 @@ async function exportCollection(id: string, name: string) {
             <span>{{ col.name }}</span>
           </button>
           <div class="hidden items-center gap-1 group-hover:flex">
+            <button class="text-xs text-gray-500 hover:text-brand-400" title="Collection Runner" @click="runningCollectionId = col.id">▶</button>
             <button
               class="text-xs text-gray-500 hover:text-brand-400 disabled:opacity-50"
               title="Postman formatida eksport"
@@ -102,5 +105,11 @@ async function exportCollection(id: string, name: string) {
         <FolderNode v-if="store.expanded[col.id]" :collection-id="col.id" :parent-folder-id="null" :depth="0" />
       </li>
     </ul>
+
+    <CollectionRunner
+      v-if="runningCollectionId"
+      :collection-id="runningCollectionId"
+      @close="runningCollectionId = null"
+    />
   </aside>
 </template>

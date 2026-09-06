@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { useSwitchStore } from '../stores/switches'
+import { useAuthStore } from '../stores/auth'
 
 defineEmits<{ 'toggle-history': []; 'toggle-variables': [] }>()
 
 const store = useSwitchStore()
+const auth = useAuthStore()
 </script>
 
 <template>
@@ -34,5 +36,9 @@ const store = useSwitchStore()
     >
       History
     </button>
+
+    <div class="h-4 w-px bg-border-subtle" />
+    <span class="text-xs text-gray-400">{{ auth.user?.fullName }}</span>
+    <button class="text-xs text-gray-500 hover:text-method-delete" title="Chiqish" @click="auth.logout()">Chiqish</button>
   </div>
 </template>
