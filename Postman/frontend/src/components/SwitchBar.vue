@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { useSwitchStore } from '../stores/switches'
 
+defineEmits<{ 'toggle-history': [] }>()
+
 const store = useSwitchStore()
 </script>
 
@@ -18,5 +20,13 @@ const store = useSwitchStore()
         <option v-for="opt in dim.options" :key="opt.id" :value="opt.id">{{ opt.name }}</option>
       </select>
     </div>
+
+    <div class="flex-1" />
+    <button
+      class="rounded-md border border-border-subtle px-2 py-1 text-xs text-gray-300 transition hover:bg-surface-2"
+      @click="$emit('toggle-history')"
+    >
+      History
+    </button>
   </div>
 </template>
