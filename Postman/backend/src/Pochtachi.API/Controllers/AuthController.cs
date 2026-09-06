@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Pochtachi.Application.Auth;
 
@@ -5,6 +6,7 @@ namespace Pochtachi.API.Controllers;
 
 [ApiController]
 [Route("api/auth")]
+[AllowAnonymous]
 public class AuthController(IAuthService service) : ControllerBase
 {
     [HttpPost("register")]

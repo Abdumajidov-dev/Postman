@@ -19,11 +19,15 @@ public class WorkspaceService(IUnitOfWork uow) : IWorkspaceService
         return ToDto(workspace);
     }
 
-    public async Task<WorkspaceDto> GetOrCreateDefaultAsync(CancellationToken ct = default)
+    public async Task<WorkspaceDto> GetOrCreateDefaultAsync(Guid ownerId, CancellationToken ct = default)
     {
-        var existing = await uow.Repository<Workspace>().ListAsync(ct: ct);
-        if (existing.Count > 0) return ToDto(existing[0]);
-        return await CreateAsync(new CreateWorkspaceRequest("Shaxsiy workspace"), ct);
+        var owned = await uow.Repository<Workspace>().ListAsync(w => w.OwnerId == ownerId, ct);
+        if (owned.Count > 0) return ToDto(owned[0]);
+
+        var workspace = new Workspace { Name = "Shaxsiy workspace", OwnerId = ownerId };
+        await uow.Repository<Workspace>().AddAsync(workspace, ct);
+        await uow.SaveChangesAsync(ct);
+        return ToDto(workspace);
     }
 
     private static WorkspaceDto ToDto(Workspace w) => new(w.Id, w.Name, w.CreatedAt);
