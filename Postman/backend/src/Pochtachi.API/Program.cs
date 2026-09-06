@@ -1,6 +1,8 @@
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using Pochtachi.Application;
+using Pochtachi.Infrastructure;
 using Pochtachi.Infrastructure.Persistence;
 using Serilog;
 using System.Text;
@@ -18,8 +20,8 @@ builder.Services.AddSwaggerGen(options =>
     options.SwaggerDoc("v1", new() { Title = "Pochtachi API", Version = "v1" });
 });
 
-builder.Services.AddDbContext<PochtachiDbContext>(options =>
-    options.UseNpgsql(builder.Configuration.GetConnectionString("Default")));
+builder.Services.AddInfrastructure(builder.Configuration);
+builder.Services.AddApplication();
 
 builder.Services.AddSignalR();
 
@@ -55,6 +57,9 @@ if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
     app.UseSwaggerUI();
+
+    using var scope = app.Services.CreateScope();
+    await scope.ServiceProvider.GetRequiredService<PochtachiDbContext>().Database.MigrateAsync();
 }
 
 app.UseSerilogRequestLogging();

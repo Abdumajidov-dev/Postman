@@ -5,7 +5,9 @@ namespace Pochtachi.Domain.Entities;
 public class Workspace : BaseEntity
 {
     public string Name { get; set; } = string.Empty;
-    public Guid OwnerId { get; set; }
+
+    /// <summary>Auth hali ulanmagan bosqichda null bo'lishi mumkin (single-user local rejim).</summary>
+    public Guid? OwnerId { get; set; }
     public User? Owner { get; set; }
 
     public ICollection<WorkspaceMember> Members { get; set; } = new List<WorkspaceMember>();

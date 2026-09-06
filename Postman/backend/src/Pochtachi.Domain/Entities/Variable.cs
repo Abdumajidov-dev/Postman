@@ -10,6 +10,9 @@ namespace Pochtachi.Domain.Entities;
 /// </summary>
 public class Variable : BaseEntity
 {
+    public Guid WorkspaceId { get; set; }
+    public Workspace? Workspace { get; set; }
+
     public VariableScope Scope { get; set; }
     public Guid? OwnerId { get; set; }
 

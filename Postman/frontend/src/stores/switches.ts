@@ -1,91 +1,61 @@
 import { defineStore } from 'pinia'
+import { api } from '../api/client'
+import { useWorkspaceStore } from './workspace'
 
 /**
- * "Switch Dimensions" — TZ 3.3.1. Har bir dimension (Environment, Role, ...) mustaqil
- * o'z aktiv variantiga ega. Bitta o'zgaruvchi shu variantlar bo'yicha turli qiymat
- * saqlaydi (masalan baseUrl: local/global; authToken: admin/user/superadmin).
- * Switch o'zgarganda — shu o'zgaruvchiga bog'liq barcha so'rovlar avtomatik yangi
- * qiymatni oladi, hech narsani qo'lda tuzatish shart emas.
+ * "Switch Dimensions" — TZ 3.3.1. Backend'dan dimension/option/variable ro'yxati
+ * olinadi; aktiv option o'zgartirilsa, server variable qiymatlarini shu bo'yicha
+ * resolve qiladi va bu yerga qaytadi — hech qanday joyni qo'lda tuzatish shart emas.
  */
 export interface SwitchOption {
   id: string
   name: string
+  order: number
 }
 
 export interface SwitchDimension {
   id: string
+  workspaceId: string
   name: string
-  options: SwitchOption[]
   activeOptionId: string | null
-}
-
-export interface Variable {
-  key: string
-  isSecret: boolean
-  /** optionId -> qiymat; "default" — hech qanday switch tanlanmaganda ishlatiladi */
-  valuesByOption: Record<string, string>
+  options: SwitchOption[]
 }
 
 export const useSwitchStore = defineStore('switches', {
   state: () => ({
-    dimensions: [
-      {
-        id: 'env',
-        name: 'Environment',
-        options: [
-          { id: 'local', name: 'Local' },
-          { id: 'global', name: 'Global' },
-        ],
-        activeOptionId: 'local',
-      },
-      {
-        id: 'role',
-        name: 'Role',
-        options: [
-          { id: 'admin', name: 'Admin' },
-          { id: 'user', name: 'User' },
-          { id: 'superadmin', name: 'SuperAdmin' },
-        ],
-        activeOptionId: 'user',
-      },
-    ] as SwitchDimension[],
-    variables: [
-      {
-        key: 'baseUrl',
-        isSecret: false,
-        valuesByOption: {
-          local: 'http://localhost:5299',
-          global: 'https://api.company.com',
-        },
-      },
-      {
-        key: 'authToken',
-        isSecret: true,
-        valuesByOption: {
-          admin: 'admin-token-xxxx',
-          user: 'user-token-xxxx',
-          superadmin: 'superadmin-token-xxxx',
-        },
-      },
-    ] as Variable[],
+    dimensions: [] as SwitchDimension[],
+    resolved: {} as Record<string, string>,
   }),
   actions: {
-    setActiveOption(dimensionId: string, optionId: string) {
-      const dim = this.dimensions.find((d) => d.id === dimensionId)
-      if (dim) dim.activeOptionId = optionId
+    async fetchAll() {
+      const workspace = useWorkspaceStore()
+      await workspace.bootstrap()
+      const { data } = await api.get<SwitchDimension[]>('/api/switch-dimensions', {
+        params: { workspaceId: workspace.id },
+      })
+      this.dimensions = data
+      await this.fetchResolved()
     },
-    /** Joriy switch holatiga qarab o'zgaruvchi qiymatini resolve qiladi. */
-    resolve(key: string): string | undefined {
-      const variable = this.variables.find((v) => v.key === key)
-      if (!variable) return undefined
 
-      for (const dim of this.dimensions) {
-        const optionId = dim.activeOptionId
-        if (optionId && variable.valuesByOption[optionId] !== undefined) {
-          return variable.valuesByOption[optionId]
-        }
-      }
-      return variable.valuesByOption['default']
+    async fetchResolved() {
+      const workspace = useWorkspaceStore()
+      const { data } = await api.get<Record<string, string>>('/api/variables/resolved', {
+        params: { workspaceId: workspace.id },
+      })
+      this.resolved = data
+    },
+
+    async setActiveOption(dimensionId: string, optionId: string) {
+      const { data } = await api.put<SwitchDimension>(`/api/switch-dimensions/${dimensionId}/active-option`, {
+        optionId,
+      })
+      const idx = this.dimensions.findIndex((d) => d.id === dimensionId)
+      if (idx >= 0) this.dimensions[idx] = data
+      await this.fetchResolved()
+    },
+
+    resolve(key: string): string | undefined {
+      return this.resolved[key]
     },
   },
 })
