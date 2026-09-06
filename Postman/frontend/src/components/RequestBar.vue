@@ -4,6 +4,8 @@ import { useSwitchStore } from '../stores/switches'
 import { useCollectionStore, type KeyValue, type BodyMode, type AuthConfig } from '../stores/collections'
 import { useHistoryStore } from '../stores/history'
 import { resolveTemplate } from '../utils/template'
+import { createPreRequestPm, createTestPm, runScript, type TestResult } from '../utils/scripting'
+import AuthEditor from './AuthEditor.vue'
 
 const methods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const
 const methodColor: Record<string, string> = {
@@ -22,32 +24,20 @@ const bodyModes: { value: BodyMode; label: string }[] = [
   { value: 'form-data', label: 'Form Data' },
 ]
 
-const authTypes: { value: AuthConfig['type']; label: string }[] = [
-  { value: 'NoAuth', label: 'No Auth' },
-  { value: 'Bearer', label: 'Bearer Token' },
-  { value: 'Basic', label: 'Basic Auth' },
-  { value: 'ApiKey', label: 'API Key' },
-  { value: 'OAuth2', label: 'OAuth 2.0' },
-  { value: 'Digest', label: 'Digest Auth' },
-]
-
 const switchStore = useSwitchStore()
 const collectionStore = useCollectionStore()
 const historyStore = useHistoryStore()
 
 const current = computed(() => collectionStore.selectedRequest)
-const activeTab = ref<'params' | 'headers' | 'body' | 'auth'>('params')
+const ownerCollection = computed(() => collectionStore.items.find((c) => c.id === current.value?.collectionId))
+const effectiveAuth = computed<AuthConfig | null>(() => current.value?.auth ?? ownerCollection.value?.auth ?? null)
+
+const activeTab = ref<'params' | 'headers' | 'auth' | 'body' | 'scripts'>('params')
 const sending = ref(false)
 const saving = ref(false)
 const result = ref<{ status?: number; durationMs?: number; body?: string; error?: string } | null>(null)
-
-function resolve(key: string) {
-  return switchStore.resolve(key)
-}
-
-function resolvedUrl(url: string) {
-  return resolveTemplate(url, resolve)
-}
+const testResults = ref<TestResult[]>([])
+const scriptError = ref<string | null>(null)
 
 function addRow(list: KeyValue[]) {
   list.push({ key: '', value: '', enabled: true })
@@ -96,22 +86,6 @@ function setBodyMode(mode: BodyMode) {
   }
 }
 
-function setAuthType(type: AuthConfig['type']) {
-  if (!current.value) return
-  if (type === 'NoAuth') {
-    current.value.auth = null
-    return
-  }
-  const defaults: Record<string, Record<string, string>> = {
-    Bearer: { token: '' },
-    Basic: { username: '', password: '' },
-    ApiKey: { key: '', value: '', in: 'header' },
-    OAuth2: { accessToken: '' },
-    Digest: { username: '', password: '' },
-  }
-  current.value.auth = { type, values: defaults[type] ?? {} }
-}
-
 async function save() {
   if (!current.value) return
   saving.value = true
@@ -122,7 +96,34 @@ async function save() {
   }
 }
 
-function buildAuthHeaders(auth: AuthConfig | null, query: URLSearchParams) {
+/** OAuth2 client_credentials orqali token oladi (Electron main process orqali, CORS'siz). */
+async function fetchOAuth2Token(values: Record<string, string>, resolve: (k: string) => string | undefined) {
+  const url = resolveTemplate(values.accessTokenUrl ?? '', resolve)
+  const clientId = resolveTemplate(values.clientId ?? '', resolve)
+  const clientSecret = resolveTemplate(values.clientSecret ?? '', resolve)
+  if (!url) return undefined
+
+  const body = new URLSearchParams({
+    grant_type: values.grantType || 'client_credentials',
+    client_id: clientId,
+    client_secret: clientSecret,
+  }).toString()
+
+  const res = await window.pochtachi.sendRequest({
+    method: 'POST',
+    url,
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body,
+  })
+  if (!res.ok || !res.body) return undefined
+  try {
+    return (JSON.parse(res.body) as { access_token?: string }).access_token
+  } catch {
+    return undefined
+  }
+}
+
+async function resolveAuthHeaders(auth: AuthConfig | null, query: URLSearchParams, resolve: (k: string) => string | undefined) {
   const headers: Record<string, string> = {}
   if (!auth) return headers
 
@@ -143,6 +144,13 @@ function buildAuthHeaders(auth: AuthConfig | null, query: URLSearchParams) {
       else headers[key] = value
       break
     }
+    case 'OAuth2': {
+      const token = auth.values.accessToken?.trim()
+        ? resolveTemplate(auth.values.accessToken, resolve)
+        : await fetchOAuth2Token(auth.values, resolve)
+      if (token) headers.Authorization = `Bearer ${token}`
+      break
+    }
   }
   return headers
 }
@@ -151,8 +159,22 @@ async function send() {
   if (!current.value) return
   sending.value = true
   result.value = null
+  testResults.value = []
+  scriptError.value = null
 
-  const url = resolvedUrl(current.value.url)
+  const runtimeVars = new Map<string, string>()
+  const resolve = (key: string) => runtimeVars.get(key) ?? switchStore.resolve(key)
+
+  if (current.value.preRequestScript) {
+    const pm = createPreRequestPm({
+      get: (key) => resolve(key),
+      set: (key, value) => runtimeVars.set(key, value),
+    })
+    const { error } = runScript(current.value.preRequestScript, pm)
+    if (error) scriptError.value = `Pre-request script xatosi: ${error}`
+  }
+
+  const url = resolveTemplate(current.value.url, resolve)
   const headers: Record<string, string> = {}
   for (const h of current.value.headers) {
     if (h.enabled && h.key) headers[h.key] = resolveTemplate(h.value, resolve)
@@ -163,7 +185,7 @@ async function send() {
     if (p.enabled && p.key) query.set(p.key, resolveTemplate(p.value, resolve))
   }
 
-  Object.assign(headers, buildAuthHeaders(current.value.auth, query))
+  Object.assign(headers, await resolveAuthHeaders(effectiveAuth.value, query, resolve))
 
   const queryStr = query.toString()
   const fullUrl = queryStr ? `${url}${url.includes('?') ? '&' : '?'}${queryStr}` : url
@@ -182,6 +204,25 @@ async function send() {
   try {
     const res = await window.pochtachi.sendRequest({ method: current.value.method, url: fullUrl, headers, body })
     result.value = res
+
+    if (current.value.testScript) {
+      const results: TestResult[] = []
+      const pm = createTestPm(
+        {
+          code: res.status ?? 0,
+          status: res.statusText ?? '',
+          responseTime: res.durationMs,
+          headers: res.headers ?? {},
+          text: () => res.body ?? '',
+          json: () => JSON.parse(res.body ?? '{}'),
+        },
+        results,
+      )
+      const { error } = runScript(current.value.testScript, pm)
+      testResults.value = results
+      if (error) scriptError.value = `Test script xatosi: ${error}`
+    }
+
     await historyStore.record({
       method: current.value.method,
       url: fullUrl,
@@ -233,7 +274,7 @@ async function send() {
 
     <div class="flex gap-4 border-b border-border-subtle bg-surface-1 px-4 text-xs">
       <button
-        v-for="tab in (['params', 'headers', 'auth', 'body'] as const)"
+        v-for="tab in (['params', 'headers', 'auth', 'body', 'scripts'] as const)"
         :key="tab"
         class="border-b-2 py-2 capitalize transition"
         :class="activeTab === tab ? 'border-brand-500 text-gray-100' : 'border-transparent text-gray-500 hover:text-gray-300'"
@@ -276,42 +317,11 @@ async function send() {
         + qator qo'shish
       </button>
 
-      <div v-if="activeTab === 'auth'" class="max-w-md space-y-3">
-        <select
-          :value="current.auth?.type ?? 'NoAuth'"
-          class="w-full rounded-md border border-border-subtle bg-surface-2 px-2 py-2 text-xs text-gray-200 outline-none"
-          @change="setAuthType(($event.target as HTMLSelectElement).value as AuthConfig['type'])"
-        >
-          <option v-for="t in authTypes" :key="t.value" :value="t.value">{{ t.label }}</option>
-        </select>
-
-        <template v-if="current.auth?.type === 'Bearer'">
-          <label class="block text-xs text-gray-500">Token</label>
-          <input v-model="current.auth.values.token" class="w-full rounded border border-border-subtle bg-surface-2 px-2 py-1.5 font-mono text-xs text-gray-200 outline-none" placeholder="{{authToken}}" />
-        </template>
-
-        <template v-else-if="current.auth?.type === 'Basic'">
-          <label class="block text-xs text-gray-500">Username</label>
-          <input v-model="current.auth.values.username" class="w-full rounded border border-border-subtle bg-surface-2 px-2 py-1.5 text-xs text-gray-200 outline-none" />
-          <label class="block text-xs text-gray-500">Password</label>
-          <input v-model="current.auth.values.password" type="password" class="w-full rounded border border-border-subtle bg-surface-2 px-2 py-1.5 text-xs text-gray-200 outline-none" />
-        </template>
-
-        <template v-else-if="current.auth?.type === 'ApiKey'">
-          <label class="block text-xs text-gray-500">Key</label>
-          <input v-model="current.auth.values.key" class="w-full rounded border border-border-subtle bg-surface-2 px-2 py-1.5 font-mono text-xs text-gray-200 outline-none" />
-          <label class="block text-xs text-gray-500">Value</label>
-          <input v-model="current.auth.values.value" class="w-full rounded border border-border-subtle bg-surface-2 px-2 py-1.5 font-mono text-xs text-gray-200 outline-none" />
-          <label class="block text-xs text-gray-500">Qo'shish joyi</label>
-          <select v-model="current.auth.values.in" class="w-full rounded-md border border-border-subtle bg-surface-2 px-2 py-1.5 text-xs text-gray-200 outline-none">
-            <option value="header">Header</option>
-            <option value="query">Query Param</option>
-          </select>
-        </template>
-
-        <p v-else-if="current.auth?.type === 'OAuth2' || current.auth?.type === 'Digest'" class="text-xs text-gray-500">
-          {{ current.auth.type }} sozlamalari saqlanadi, lekin so'rov yuborishda avtomatik hisoblash keyingi versiyada qo'shiladi.
+      <div v-if="activeTab === 'auth'">
+        <p v-if="!current.auth && ownerCollection?.auth" class="mb-2 text-xs text-gray-500">
+          Collection'dan meros: <span class="text-gray-300">{{ ownerCollection.auth.type }}</span>. O'zgartirish uchun bu yerda tanlang.
         </p>
+        <AuthEditor v-model="current.auth" />
       </div>
 
       <div v-if="activeTab === 'body'">
@@ -354,15 +364,48 @@ async function send() {
           </button>
         </template>
       </div>
+
+      <div v-if="activeTab === 'scripts'" class="space-y-4">
+        <div>
+          <label class="mb-1 block text-xs font-semibold text-gray-400">Pre-request Script</label>
+          <textarea
+            v-model="current.preRequestScript"
+            class="h-32 w-full rounded-md border border-border-subtle bg-surface-2 p-3 font-mono text-xs text-gray-200 outline-none focus:border-brand-500"
+            placeholder="pm.variables.set('token', '123')"
+          />
+        </div>
+        <div>
+          <label class="mb-1 block text-xs font-semibold text-gray-400">Test Script</label>
+          <textarea
+            v-model="current.testScript"
+            class="h-32 w-full rounded-md border border-border-subtle bg-surface-2 p-3 font-mono text-xs text-gray-200 outline-none focus:border-brand-500"
+            placeholder="pm.test('status 200', () => { pm.expect(pm.response.code).to.equal(200) })"
+          />
+        </div>
+        <p class="text-xs text-gray-600">
+          `pm.environment`/`pm.variables` — get/set (shu yuborishga xos, saqlanmaydi). `pm.test(nomi, fn)`,
+          `pm.expect(qiymat).to.equal/eql/a/above/below/include/true/false`. To'liq Postman API emas — asosiy kichik qism.
+        </p>
+      </div>
     </div>
 
-    <div v-if="result" class="border-t border-border-subtle bg-surface-1 px-4 py-3 font-mono text-xs">
-      <template v-if="result.error">
+    <div v-if="result || scriptError" class="border-t border-border-subtle bg-surface-1 px-4 py-3 font-mono text-xs">
+      <p v-if="scriptError" class="mb-2 text-method-delete">{{ scriptError }}</p>
+      <template v-if="result?.error">
         <span class="text-method-delete">Xato: {{ result.error }}</span>
       </template>
-      <template v-else>
+      <template v-else-if="result">
         <span class="text-method-get">{{ result.status }}</span>
         <span class="ml-3 text-gray-500">{{ result.durationMs }}ms</span>
+
+        <div v-if="testResults.length > 0" class="mt-2 space-y-1">
+          <div v-for="t in testResults" :key="t.name" class="flex items-center gap-2">
+            <span :class="t.passed ? 'text-method-get' : 'text-method-delete'">{{ t.passed ? '✓' : '✗' }}</span>
+            <span class="text-gray-300">{{ t.name }}</span>
+            <span v-if="t.error" class="text-gray-500">— {{ t.error }}</span>
+          </div>
+        </div>
+
         <pre class="mt-2 max-h-64 overflow-auto whitespace-pre-wrap text-gray-300">{{ result.body }}</pre>
       </template>
     </div>

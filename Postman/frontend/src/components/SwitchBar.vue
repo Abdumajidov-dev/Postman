@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { useSwitchStore } from '../stores/switches'
 
-defineEmits<{ 'toggle-history': [] }>()
+defineEmits<{ 'toggle-history': []; 'toggle-variables': [] }>()
 
 const store = useSwitchStore()
 </script>
@@ -22,6 +22,12 @@ const store = useSwitchStore()
     </div>
 
     <div class="flex-1" />
+    <button
+      class="rounded-md border border-border-subtle px-2 py-1 text-xs text-gray-300 transition hover:bg-surface-2"
+      @click="$emit('toggle-variables')"
+    >
+      Variables
+    </button>
     <button
       class="rounded-md border border-border-subtle px-2 py-1 text-xs text-gray-300 transition hover:bg-surface-2"
       @click="$emit('toggle-history')"

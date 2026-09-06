@@ -30,7 +30,7 @@ public class PostmanImportExportService(IUnitOfWork uow) : IPostmanImportExportS
                 if (item is not null)
                     await ImportItemAsync(collection.Id, null, item.AsObject(), ct);
 
-        return new CollectionDto(collection.Id, collection.WorkspaceId, collection.Name, collection.Description);
+        return new CollectionDto(collection.Id, collection.WorkspaceId, collection.Name, collection.Description, null);
     }
 
     private async Task ImportItemAsync(Guid collectionId, Guid? parentFolderId, JsonObject item, CancellationToken ct)

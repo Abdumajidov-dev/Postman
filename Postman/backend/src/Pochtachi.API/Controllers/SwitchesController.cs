@@ -3,6 +3,8 @@ using Pochtachi.Application.Switches;
 
 namespace Pochtachi.API.Controllers;
 
+public record AddSwitchOptionRequest(string Name);
+
 [ApiController]
 [Route("api/switch-dimensions")]
 public class SwitchDimensionsController(ISwitchDimensionService service) : ControllerBase
@@ -19,6 +21,13 @@ public class SwitchDimensionsController(ISwitchDimensionService service) : Contr
     public async Task<IActionResult> SetActiveOption(Guid id, SetActiveOptionRequest request, CancellationToken ct)
     {
         var result = await service.SetActiveOptionAsync(id, request, ct);
+        return result is null ? NotFound() : Ok(result);
+    }
+
+    [HttpPost("{id:guid}/options")]
+    public async Task<IActionResult> AddOption(Guid id, AddSwitchOptionRequest request, CancellationToken ct)
+    {
+        var result = await service.AddOptionAsync(id, request.Name, ct);
         return result is null ? NotFound() : Ok(result);
     }
 }
@@ -45,4 +54,8 @@ public class VariablesController(IVariableService service) : ControllerBase
         var result = await service.SetValueAsync(id, request, ct);
         return result is null ? NotFound() : Ok(result);
     }
+
+    [HttpDelete("{id:guid}")]
+    public async Task<IActionResult> Delete(Guid id, CancellationToken ct) =>
+        await service.DeleteAsync(id, ct) ? NoContent() : NotFound();
 }

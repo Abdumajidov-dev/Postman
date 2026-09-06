@@ -44,6 +44,22 @@ public class SwitchDimensionService(IUnitOfWork uow) : ISwitchDimensionService
         return await ToDtoAsync(dimension, ct);
     }
 
+    public async Task<SwitchDimensionDto?> AddOptionAsync(Guid dimensionId, string name, CancellationToken ct = default)
+    {
+        var dimension = await uow.Repository<SwitchDimension>().GetByIdAsync(dimensionId, ct);
+        if (dimension is null) return null;
+
+        var existing = await uow.Repository<SwitchOption>().ListAsync(o => o.SwitchDimensionId == dimensionId, ct);
+        await uow.Repository<SwitchOption>().AddAsync(new SwitchOption
+        {
+            SwitchDimensionId = dimensionId,
+            Name = name,
+            Order = existing.Count,
+        }, ct);
+        await uow.SaveChangesAsync(ct);
+        return await ToDtoAsync(dimension, ct);
+    }
+
     private async Task<SwitchDimensionDto> ToDtoAsync(SwitchDimension dimension, CancellationToken ct)
     {
         var options = await uow.Repository<SwitchOption>().ListAsync(o => o.SwitchDimensionId == dimension.Id, ct);

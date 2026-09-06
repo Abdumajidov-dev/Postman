@@ -51,6 +51,21 @@ public class VariableService(IUnitOfWork uow) : IVariableService
         return await ToDtoAsync(variable, ct);
     }
 
+    public async Task<bool> DeleteAsync(Guid variableId, CancellationToken ct = default)
+    {
+        var repo = uow.Repository<Variable>();
+        var variable = await repo.GetByIdAsync(variableId, ct);
+        if (variable is null) return false;
+
+        var values = await uow.Repository<VariableValue>().ListAsync(v => v.VariableId == variableId, ct);
+        var valueRepo = uow.Repository<VariableValue>();
+        foreach (var value in values) valueRepo.Remove(value);
+
+        repo.Remove(variable);
+        await uow.SaveChangesAsync(ct);
+        return true;
+    }
+
     public async Task<Dictionary<string, string>> ResolveAllAsync(Guid workspaceId, CancellationToken ct = default)
     {
         var dimensions = await uow.Repository<SwitchDimension>().ListAsync(d => d.WorkspaceId == workspaceId, ct);

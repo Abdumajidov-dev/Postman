@@ -7,6 +7,7 @@ export interface CollectionItem {
   workspaceId: string
   name: string
   description: string | null
+  auth: AuthConfig | null
 }
 
 export interface FolderItem {
@@ -85,6 +86,18 @@ export const useCollectionStore = defineStore('collections', {
         description: null,
       })
       this.items.push(data)
+    },
+
+    async updateAuth(id: string, auth: AuthConfig | null) {
+      const collection = this.items.find((c) => c.id === id)
+      if (!collection) return
+      const { data } = await api.put<CollectionItem>(`/api/collections/${id}`, {
+        name: collection.name,
+        description: collection.description,
+        auth,
+      })
+      const idx = this.items.findIndex((c) => c.id === id)
+      if (idx >= 0) this.items[idx] = data
     },
 
     async remove(id: string) {
